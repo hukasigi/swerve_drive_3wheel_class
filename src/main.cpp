@@ -13,15 +13,6 @@ class Steering {
                  uint8_t ID)
             : motor(motor), encoder(encoder), limit_switch(limit_switch), pid(pid), target_degree(0), offset_degree(offset_deg),
               ID(ID) {}
-        // {
-        //     this->motor         = motor;
-        //     this->encoder       = encoder;
-        //     this->limit_switch  = limit_switch;
-        //     this->pid           = pid;
-        //     this->target_degree = 0;
-        //     this->offset_degree = offset_deg;
-        //     this->ID            = ID;
-        // }
         bool calibrate_zero() { // 0点合わせ
             uint32_t startTime = millis();
             this->motor->run(CALIBRATING_DUTY);
@@ -124,25 +115,26 @@ class Drive {
         }
 
         void update(double dt) {
-            double drive_duty;
+            double drive_command;
 
             if (mode == ControlMode::Speed) {
                 const double current_mm_s = get_current_mm_s();
 
-                drive_duty = pid->update(target_mm_s, current_mm_s, dt);
+                drive_command = pid->update(target_mm_s, current_mm_s, dt);
 
                 static uint32_t last_print_time = 0;
                 const uint32_t  now             = millis();
 
                 if (now - last_print_time >= 1000) {
                     last_print_time = now;
-                    Serial.printf("id:%d target: %.1f current: %.1f duty: %.1f\n", ID, target_mm_s, current_mm_s, drive_duty);
+                    Serial.printf("id:%d target: %.1f current: %.1f duty: %.1f\n", ID, target_mm_s, current_mm_s,
+                                  drive_command);
                 }
             } else {
-                drive_duty = target_duty;
+                drive_command = target_duty;
             }
 
-            motor->run(drive_duty);
+            motor->run(drive_command);
         }
 
         void stop() {
@@ -244,24 +236,21 @@ IncrementalEncoder steering_encoder_1(STEERING_ENCODER_A_1, STEERING_ENCODER_B_1
 LimitSwitch        steering_limit_switch_1(STEERING_LIMIT_SW_1);
 AnglePID           steering_pid_1(STEERING_PID_PARAM.p_gain, STEERING_PID_PARAM.i_gain, STEERING_PID_PARAM.d_gain,
                                   -STEER_MOTOR_POWER_LIMIT, STEER_MOTOR_POWER_LIMIT, -STEER_INTEGRAL_LIMIT, STEER_INTEGRAL_LIMIT, RANGE);
-Steering           steering_1(&steering_motor_1, &steering_encoder_1, &steering_limit_switch_1,
-                   &steering_pid_1, OFFSET_DEG_1, 1);
+Steering steering_1(&steering_motor_1, &steering_encoder_1, &steering_limit_switch_1, &steering_pid_1, OFFSET_DEG_1, 1);
 
 Motor              steering_motor_2(STEERING_MOTOR_DIR_2, STEERING_MOTOR_PWM_2, STEERING_MOTOR_CH_2);
 IncrementalEncoder steering_encoder_2(STEERING_ENCODER_A_2, STEERING_ENCODER_B_2);
 LimitSwitch        steering_limit_switch_2(STEERING_LIMIT_SW_2);
 AnglePID           steering_pid_2(STEERING_PID_PARAM.p_gain, STEERING_PID_PARAM.i_gain, STEERING_PID_PARAM.d_gain,
                                   -STEER_MOTOR_POWER_LIMIT, STEER_MOTOR_POWER_LIMIT, -STEER_INTEGRAL_LIMIT, STEER_INTEGRAL_LIMIT, RANGE);
-Steering           steering_2(&steering_motor_2, &steering_encoder_2, &steering_limit_switch_2,
-                   &steering_pid_2, OFFSET_DEG_2, 2);
+Steering steering_2(&steering_motor_2, &steering_encoder_2, &steering_limit_switch_2, &steering_pid_2, OFFSET_DEG_2, 2);
 
 Motor              steering_motor_3(STEERING_MOTOR_DIR_3, STEERING_MOTOR_PWM_3, STEERING_MOTOR_CH_3);
 IncrementalEncoder steering_encoder_3(STEERING_ENCODER_A_3, STEERING_ENCODER_B_3);
 LimitSwitch        steering_limit_switch_3(STEERING_LIMIT_SW_3);
 AnglePID           steering_pid_3(STEERING_PID_PARAM.p_gain, STEERING_PID_PARAM.i_gain, STEERING_PID_PARAM.d_gain,
                                   -STEER_MOTOR_POWER_LIMIT, STEER_MOTOR_POWER_LIMIT, -STEER_INTEGRAL_LIMIT, STEER_INTEGRAL_LIMIT, RANGE);
-Steering           steering_3(&steering_motor_3, &steering_encoder_3, &steering_limit_switch_3,
-                   &steering_pid_3, OFFSET_DEG_3, 3);
+Steering steering_3(&steering_motor_3, &steering_encoder_3, &steering_limit_switch_3, &steering_pid_3, OFFSET_DEG_3, 3);
 
 RobomasMotor drive_motor_1(DRIVE_MOTOR_ID_1);
 RobomasMotor drive_motor_2(DRIVE_MOTOR_ID_2);

@@ -9,14 +9,19 @@ using namespace nnct::interfaces;
 
 class Steering {
     public:
-        Steering(Motor* motor, IncrementalEncoder* encoder, LimitSwitch* limit_switch, AnglePID* pid, double offset_deg) {
-            this->motor         = motor;
-            this->encoder       = encoder;
-            this->limit_switch  = limit_switch;
-            this->pid           = pid;
-            this->target_degree = 0;
-            this->offset_degree = offset_deg;
-        }
+        Steering(Motor* motor, IncrementalEncoder* encoder, LimitSwitch* limit_switch, AnglePID* pid, double offset_deg,
+                 uint8_t ID)
+            : motor(motor), encoder(encoder), limit_switch(limit_switch), pid(pid), target_degree(0), offset_degree(offset_deg),
+              ID(ID) {}
+        // {
+        //     this->motor         = motor;
+        //     this->encoder       = encoder;
+        //     this->limit_switch  = limit_switch;
+        //     this->pid           = pid;
+        //     this->target_degree = 0;
+        //     this->offset_degree = offset_deg;
+        //     this->ID            = ID;
+        // }
         bool calibrate_zero() { // 0点合わせ
             uint32_t startTime = millis();
             this->motor->run(CALIBRATING_DUTY);
@@ -55,12 +60,16 @@ class Steering {
 
             return normalizeAngleDeg(degree);
         }
-        void update(double dt) {
+        int32_t get_encoder_count() const { return encoder->getCount(); }
+        void    update(double dt) {
             double current_degree = this->get_current_degree();
             double duty           = this->pid->update(this->target_degree, current_degree, dt);
             double error          = pid->getError();
 
-            // Serial.printf("current_deg%f target_deg_f%f\r\n", current_degree, target_degree);
+            const double dead_zone = 3.0;
+            if (fabs(error) < dead_zone) {
+                duty = 0;
+            }
 
             this->motor->run(duty, -1);
         }
@@ -82,6 +91,8 @@ class Steering {
         double target_degree;
         double offset_degree;
 
+        const uint8_t ID;
+
         static const uint32_t CALIBRATING_TIMEOUT_MS = 8000;
 };
 
@@ -91,8 +102,8 @@ class Drive {
             Duty,
             Speed
         };
-        Drive(RobomasMotor* motor, IncrementalPID* pid)
-            : motor(motor), pid(pid), mode(ControlMode::Duty), target_duty(0.0), target_mm_s(0.0) {}
+        Drive(RobomasMotor* motor, IncrementalPID* pid, uint8_t ID)
+            : motor(motor), pid(pid), mode(ControlMode::Duty), target_duty(0.0), target_mm_s(0.0), ID(ID) {}
 
         // duty指定
         void set_target_duty(double duty) {
@@ -119,6 +130,14 @@ class Drive {
                 const double current_mm_s = get_current_mm_s();
 
                 drive_duty = pid->update(target_mm_s, current_mm_s, dt);
+
+                static uint32_t last_print_time = 0;
+                const uint32_t  now             = millis();
+
+                if (now - last_print_time >= 1000) {
+                    last_print_time = now;
+                    Serial.printf("id:%d target: %.1f current: %.1f duty: %.1f\n", ID, target_mm_s, current_mm_s, drive_duty);
+                }
             } else {
                 drive_duty = target_duty;
             }
@@ -140,14 +159,13 @@ class Drive {
         ControlMode mode;
         double      target_duty;
         double      target_mm_s;
+
+        const uint8_t ID;
 };
 
 class SwerveDrive {
     public:
-        SwerveDrive(Drive* drive, Steering* steering) {
-            this->drive    = drive;
-            this->steering = steering;
-        }
+        SwerveDrive(Drive* drive, Steering* steering, uint8_t ID) : drive(drive), steering(steering), ID(ID) {}
         bool init() {
             if (!this->steering->calibrate_zero()) {
                 return false;
@@ -167,6 +185,8 @@ class SwerveDrive {
             double          current_degree = steering->get_current_degree();
             OptimizedParams params         = optimizeSteerAngle(degree, current_degree);
 
+            // Serial.printf("OPT target=%.1f current=%.1f count=%ld\n", degree, current_degree, steering->get_encoder_count());
+
             steering->set_target(params.degree);
             drive->set_target_mm_s(drive_target_mm_s * params.drive_dir);
         }
@@ -178,8 +198,9 @@ class SwerveDrive {
         }
 
     private:
-        Drive*    drive;
-        Steering* steering;
+        Drive*        drive;
+        Steering*     steering;
+        const uint8_t ID;
 
         struct OptimizedParams {
                 double degree;
@@ -223,21 +244,24 @@ IncrementalEncoder steering_encoder_1(STEERING_ENCODER_A_1, STEERING_ENCODER_B_1
 LimitSwitch        steering_limit_switch_1(STEERING_LIMIT_SW_1);
 AnglePID           steering_pid_1(STEERING_PID_PARAM.p_gain, STEERING_PID_PARAM.i_gain, STEERING_PID_PARAM.d_gain,
                                   -STEER_MOTOR_POWER_LIMIT, STEER_MOTOR_POWER_LIMIT, -STEER_INTEGRAL_LIMIT, STEER_INTEGRAL_LIMIT, RANGE);
-Steering           steering_1(&steering_motor_1, &steering_encoder_1, &steering_limit_switch_1, &steering_pid_1, OFFSET_DEG_1);
+Steering           steering_1(&steering_motor_1, &steering_encoder_1, &steering_limit_switch_1,
+                   &steering_pid_1, OFFSET_DEG_1, 1);
 
 Motor              steering_motor_2(STEERING_MOTOR_DIR_2, STEERING_MOTOR_PWM_2, STEERING_MOTOR_CH_2);
 IncrementalEncoder steering_encoder_2(STEERING_ENCODER_A_2, STEERING_ENCODER_B_2);
 LimitSwitch        steering_limit_switch_2(STEERING_LIMIT_SW_2);
 AnglePID           steering_pid_2(STEERING_PID_PARAM.p_gain, STEERING_PID_PARAM.i_gain, STEERING_PID_PARAM.d_gain,
                                   -STEER_MOTOR_POWER_LIMIT, STEER_MOTOR_POWER_LIMIT, -STEER_INTEGRAL_LIMIT, STEER_INTEGRAL_LIMIT, RANGE);
-Steering           steering_2(&steering_motor_2, &steering_encoder_2, &steering_limit_switch_2, &steering_pid_2, OFFSET_DEG_2);
+Steering           steering_2(&steering_motor_2, &steering_encoder_2, &steering_limit_switch_2,
+                   &steering_pid_2, OFFSET_DEG_2, 2);
 
 Motor              steering_motor_3(STEERING_MOTOR_DIR_3, STEERING_MOTOR_PWM_3, STEERING_MOTOR_CH_3);
 IncrementalEncoder steering_encoder_3(STEERING_ENCODER_A_3, STEERING_ENCODER_B_3);
 LimitSwitch        steering_limit_switch_3(STEERING_LIMIT_SW_3);
 AnglePID           steering_pid_3(STEERING_PID_PARAM.p_gain, STEERING_PID_PARAM.i_gain, STEERING_PID_PARAM.d_gain,
                                   -STEER_MOTOR_POWER_LIMIT, STEER_MOTOR_POWER_LIMIT, -STEER_INTEGRAL_LIMIT, STEER_INTEGRAL_LIMIT, RANGE);
-Steering           steering_3(&steering_motor_3, &steering_encoder_3, &steering_limit_switch_3, &steering_pid_3, OFFSET_DEG_3);
+Steering           steering_3(&steering_motor_3, &steering_encoder_3, &steering_limit_switch_3,
+                   &steering_pid_3, OFFSET_DEG_3, 3);
 
 RobomasMotor drive_motor_1(DRIVE_MOTOR_ID_1);
 RobomasMotor drive_motor_2(DRIVE_MOTOR_ID_2);
@@ -253,13 +277,14 @@ IncrementalPID drive_pid_2(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE
 IncrementalPID drive_pid_3(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
                            DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
 
-Drive drive_1(&drive_motor_1, &drive_pid_1);
-Drive drive_2(&drive_motor_2, &drive_pid_2);
-Drive drive_3(&drive_motor_3, &drive_pid_3);
+// 後ろのはID printのときなどに使用
+Drive drive_1(&drive_motor_1, &drive_pid_1, 1);
+Drive drive_2(&drive_motor_2, &drive_pid_2, 2);
+Drive drive_3(&drive_motor_3, &drive_pid_3, 3);
 
-SwerveDrive swerve_drive_1(&drive_1, &steering_1);
-SwerveDrive swerve_drive_2(&drive_2, &steering_2);
-SwerveDrive swerve_drive_3(&drive_3, &steering_3);
+SwerveDrive swerve_drive_1(&drive_1, &steering_1, 1);
+SwerveDrive swerve_drive_2(&drive_2, &steering_2, 2);
+SwerveDrive swerve_drive_3(&drive_3, &steering_3, 3);
 
 SwerveDrive*     swerve_drives[]    = {&swerve_drive_1, &swerve_drive_2, &swerve_drive_3};
 constexpr size_t NUM_SWERVE_MODULES = 3;
@@ -485,7 +510,7 @@ void loop() {
     // handle_controller_input(rx, ry, r2_val);
 
     set_robot_velocity(target_data.x_mm_s, target_data.y_mm_s, target_data.theta_deg_s);
-    // set_robot_velocity(0, 0, 10);
+    // set_robot_velocity(0, 0, -50);
 
     // Serial.printf("x:%d y:%d deg:%d receive:%d\r\n", target_data.x_mm_s, target_data.y_mm_s, target_data.theta_deg_s,
     //               target_data.received);

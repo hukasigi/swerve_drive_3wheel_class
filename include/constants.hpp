@@ -45,7 +45,7 @@ const pin_t CAN_RX_PIN = 4; // 実際の配線に合わせて変更
 const pin_t CAN_TX_PIN = 5; // 実際の配線に合わせて変更
 
 // ステア制御パラメータ
-const int16_t STEER_MOTOR_POWER_LIMIT = 200;
+const int16_t STEER_MOTOR_POWER_LIMIT = 255;
 const int16_t STEER_INTEGRAL_LIMIT    = 10;
 const int16_t RANGE                   = 360;
 
@@ -58,9 +58,12 @@ const double     MAGNITUDE_DEADZONE = 15.0;
 const uint32_t   CONTROL_CYCLE_MS   = 10; // 10ms = 100Hz
 constexpr double CONTROL_CYCLE_S    = CONTROL_CYCLE_MS / 1000.0;
 
+constexpr double TRANSLATION_DEADZONE_MM_S = 100.0;
+constexpr double ROTATION_DEADZONE_DEG_S   = 20.0;
+
 // PIDパラメータ
-const struct PidParam STEERING_PID_PARAM = {.p_gain = 6., .i_gain = 0.0, .d_gain = 0.0};
-const struct PidParam DRIVE_PID_PARAM    = {.p_gain = 1., .i_gain = 0.0, .d_gain = 0.0};
+const struct PidParam STEERING_PID_PARAM = {.p_gain = 25., .i_gain = 0.0, .d_gain = 0.0};
+const struct PidParam DRIVE_PID_PARAM    = {.p_gain = 0.4, .i_gain = 0.0, .d_gain = 0.0};
 
 // FreeRTOS
 constexpr uint32_t CONTROL_LOOP_TASK_STACK_SIZE = 8192;
@@ -76,12 +79,15 @@ constexpr int8_t   ENCODER_SIGN_2     = 1;
 constexpr int8_t   ENCODER_SIGN_3     = 1;
 constexpr uint32_t ENCODER_RESOLUTION = 8192;
 
-constexpr double        GEAR_RATIO       = 1.0;
+// constexpr double GEAR_RATIO = 1.0;
 static constexpr double DRIVE_GEAR_RATIO = 19.0 / 1.0; // モーター:ホイールの速度比
+// static constexpr double DRIVE_GEAR_RATIO = 1.0; // モーター:ホイールの速度比
 
 static constexpr double STEER_GEAR_RATIO_MOTOR_TO_STEER = 65.0 / 27.0;
 
 static const int32_t CALIBRATING_DUTY = 150;
 
 // ホイール物理最大速度（実機に合わせて調整）  482rpmなので1200mm/s
-const double DRIVE_MAX_SPEED_MM_S = 2400.0;
+constexpr double DRIVE_MAX_SPEED_MM_S = 2400.0;
+
+constexpr double MAX_ROTATE_SPEED_DEG_S = 300.0;

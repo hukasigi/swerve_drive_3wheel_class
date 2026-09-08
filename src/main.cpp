@@ -1,6 +1,7 @@
 #include "AnglePid.h"
 #include "IncrementalPid.h"
 #include "PS4Controller.h"
+#include "Pid.h"
 #include "constants.hpp"
 #include "nnct/interfaces/interfaces.hpp"
 #include <Arduino.h>
@@ -57,10 +58,19 @@ class Steering {
             double duty           = this->pid->update(this->target_degree, current_degree, dt);
             double error          = pid->getError();
 
-            const double dead_zone = 3.0;
+            const double dead_zone = 1.0;
             if (fabs(error) < dead_zone) {
-                duty = 0;
+                duty = 0.0;
+                // this->pid->reset();
             }
+
+            // static uint32_t last_print_time = 0;
+            // const uint32_t  now             = millis();
+
+            // if (now - last_print_time >= 1000) {
+            //     last_print_time = now;
+            //     Serial.printf("id:%d target: %.1f current: %.1f duty: %.1f\n", ID, target_degree, current_degree, duty);
+            // }
 
             this->motor->run(duty, -1);
         }
@@ -93,7 +103,7 @@ class Drive {
             Duty,
             Speed
         };
-        Drive(RobomasMotor* motor, IncrementalPID* pid, uint8_t ID)
+        Drive(RobomasMotor* motor, PID* pid, uint8_t ID)
             : motor(motor), pid(pid), mode(ControlMode::Duty), target_duty(0.0), target_mm_s(0.0), ID(ID) {}
 
         // duty指定
@@ -122,14 +132,14 @@ class Drive {
 
                 drive_command = pid->update(target_mm_s, current_mm_s, dt);
 
-                static uint32_t last_print_time = 0;
-                const uint32_t  now             = millis();
+                // static uint32_t last_print_time = 0;
+                // const uint32_t  now             = millis();
 
-                if (now - last_print_time >= 1000) {
-                    last_print_time = now;
-                    Serial.printf("id:%d target: %.1f current: %.1f duty: %.1f\n", ID, target_mm_s, current_mm_s,
-                                  drive_command);
-                }
+                // if (now - last_print_time >= 1000) {
+                //     last_print_time = now;
+                //     Serial.printf("id:%d target: %.1f current: %.1f duty: %.1f\n", ID, target_mm_s, current_mm_s,
+                //                   drive_command);
+                // }
             } else {
                 drive_command = target_duty;
             }
@@ -145,8 +155,8 @@ class Drive {
         }
 
     private:
-        RobomasMotor*   motor;
-        IncrementalPID* pid;
+        RobomasMotor* motor;
+        PID*          pid;
 
         ControlMode mode;
         double      target_duty;
@@ -259,12 +269,12 @@ RobomasMotor drive_motor_3(DRIVE_MOTOR_ID_3);
 target_vec_data target_data;
 CAN             can(CAN_RX_PIN, CAN_TX_PIN);
 
-IncrementalPID drive_pid_1(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
-                           DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
-IncrementalPID drive_pid_2(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
-                           DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
-IncrementalPID drive_pid_3(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
-                           DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
+PID drive_pid_1(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
+                DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
+PID drive_pid_2(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
+                DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
+PID drive_pid_3(DRIVE_PID_PARAM.p_gain, DRIVE_PID_PARAM.i_gain, DRIVE_PID_PARAM.d_gain, -DRIVE_MOTOR_POWER_LIMIT,
+                DRIVE_MOTOR_POWER_LIMIT, -DRIVE_INTEGRAL_LIMIT, DRIVE_INTEGRAL_LIMIT);
 
 // 後ろのはID printのときなどに使用
 Drive drive_1(&drive_motor_1, &drive_pid_1, 1);
@@ -391,11 +401,22 @@ const ModulePosition MODULE_POSITIONS[NUM_SWERVE_MODULES] = {
 };
 
 void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
+
+    // 小さい速度指令を0にする
+    if (hypot(vx_mm_s, vy_mm_s) < TRANSLATION_DEADZONE_MM_S) {
+        vx_mm_s = 0.0;
+        vy_mm_s = 0.0;
+    }
+
+    if (fabs(omega_deg_s) < ROTATION_DEADZONE_DEG_S) {
+        omega_deg_s = 0.0;
+    }
+
     const double omega_rad_s = omega_deg_s * M_PI / 180.0;
 
-    double wheel_speed[NUM_SWERVE_MODULES];
-    double wheel_angle[NUM_SWERVE_MODULES];
-    double max_speed = 0.0;
+    double        wheel_speed[NUM_SWERVE_MODULES];
+    static double wheel_angle[NUM_SWERVE_MODULES];
+    double        max_speed = 0.0;
 
     for (size_t i = 0; i < NUM_SWERVE_MODULES; ++i) {
         const double x = MODULE_POSITIONS[i].x_mm;
@@ -406,7 +427,10 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
         const double wheel_vy = vy_mm_s + omega_rad_s * x;
 
         wheel_speed[i] = hypot(wheel_vx, wheel_vy);
-        wheel_angle[i] = atan2(wheel_vy, wheel_vx) * 180.0 / M_PI;
+
+        if (!(vx_mm_s == 0.0 && vy_mm_s == 0.0 && omega_deg_s == 0.0)) {
+            wheel_angle[i] = atan2(wheel_vy, wheel_vx) * 180.0 / M_PI;
+        }
 
         // 車輪で一番早いものを探す
         if (wheel_speed[i] > max_speed) {
@@ -424,7 +448,7 @@ void set_robot_velocity(double vx_mm_s, double vy_mm_s, double omega_deg_s) {
     }
 }
 
-void handle_controller_input(int x_vec, int y_vec, uint8_t drive_power) {
+void handle_controller_input_deg_vec(int x_vec, int y_vec, uint8_t drive_power) {
     double magnitude = hypot((double)x_vec, (double)y_vec);
 
     if (magnitude <= MAGNITUDE_DEADZONE) {
@@ -438,6 +462,25 @@ void handle_controller_input(int x_vec, int y_vec, uint8_t drive_power) {
     for (size_t i = 0; i < NUM_SWERVE_MODULES; i++) {
         swerve_drives[i]->set_target_duty(degree, drive_target_duty);
     }
+}
+
+void handle_controller_input(int x_vec, int y_vec, uint8_t l2_value, uint8_t r2_value) {
+    constexpr double MAX_TRANSLATION_SPEED_MM_S = DRIVE_MAX_SPEED_MM_S;
+    constexpr double MAX_ROTATION_SPEED_DEG_S   = MAX_ROTATE_SPEED_DEG_S;
+
+    constexpr double STICK_MAX   = 127.0;
+    constexpr double TRIGGER_MAX = 255.0;
+
+    // 右スティック：並進
+    const double vx = static_cast<double>(x_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
+    const double vy = static_cast<double>(y_vec) / STICK_MAX * MAX_TRANSLATION_SPEED_MM_S;
+
+    // R2 - L2：旋回
+    // 符号が逆なら l2_value と r2_value を入れ替える
+    const double omega =
+        (static_cast<double>(l2_value) - static_cast<double>(r2_value)) / TRIGGER_MAX * MAX_ROTATION_SPEED_DEG_S;
+
+    set_robot_velocity(vx, vy, omega);
 }
 
 void update_swerve_drives() {
@@ -495,14 +538,22 @@ void loop() {
     // int     rx     = PS4.RStickX();
     // int     ry     = PS4.RStickY();
     // uint8_t r2_val = PS4.R2Value();
+    // uint8_t l2_val = PS4.L2Value();
 
-    // handle_controller_input(rx, ry, r2_val);
+    // handle_controller_input_deg_vec(rx, ry, r2_val);
+    // handle_controller_input(rx, ry, l2_val, r2_val);
 
     set_robot_velocity(target_data.x_mm_s, target_data.y_mm_s, target_data.theta_deg_s);
-    // set_robot_velocity(0, 0, -50);
+    // set_robot_velocity(1000, 0, 0);
 
-    // Serial.printf("x:%d y:%d deg:%d receive:%d\r\n", target_data.x_mm_s, target_data.y_mm_s, target_data.theta_deg_s,
-    //               target_data.received);
+    // static uint32_t last_print_time = 0;
+    // const uint32_t  now             = millis();
+
+    // if (now - last_print_time >= 1000) {
+    //     last_print_time = now;
+    //     Serial.printf("x:%d y:%d deg:%d receive:%d\r\n", target_data.x_mm_s, target_data.y_mm_s, target_data.theta_deg_s,
+    //                   target_data.received);
+    // }
 
     delay(LOOP_DELAY_MS);
 }
